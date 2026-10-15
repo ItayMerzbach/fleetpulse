@@ -11,7 +11,7 @@ React 19 · TypeScript · Vite · Vitest · zod · React-Leaflet with OpenStreet
 ```bash
 npm install
 npm start        # mock server on :3000 + dashboard on :5173 (opens the browser)
-npm test         # 57 unit + integration tests
+npm test         # 58 unit + integration tests
 ```
 
 - Requires Node 20+.
@@ -75,7 +75,7 @@ npm test         # 57 unit + integration tests
 
 | # | Quirk | Handling | Where |
 |---|---|---|---|
-| 1 | GPS batch of 10–30 old readings | Sorted by event time and merged into a bounded, sorted **path** (hollow dots on the map). One commit and one anomaly per batch. The truck's current position only moves if a batch reading is newer than it. | `TelemetryProcessor` |
+| 1 | GPS batch of 10–30 old readings | Sorted by event time and merged into each truck's bounded, sorted **path**. The map draws **one marker and one path line per truck**, never one marker per reading, and the truck shows a **"GPS +N" badge** for 10 s after a batch. One commit and one anomaly per batch. The current position only moves if a batch reading is newer than it. | `TelemetryProcessor`, `LeafletFleetMap` |
 | 2 | Fuel reads 0% for 2–4 s while braking | A sudden drop (≥15 points, or an exact 0) is held as **suspect** while the last good value stays on screen. If it recovers, it's logged as a *sensor bug*. If it persists ≥8 s, it's accepted as **real** and flagged for action. Low-fuel alerts use only the filtered value. | `fuelFilter.ts` |
 | 3 | truck_7 reports 999 km/h | Implausible values (>160, negative, NaN) are rejected. The dispatcher sees the **last valid speed with a "sensor fault" badge**, never 999, and the chart shows a gap. Fault start/end are logged with duration. | `speedFilter.ts` |
 | 4 | 409 on version mismatch | Every PATCH sends `If-Match` with the version **the dispatcher was looking at**. A 409 opens a side-by-side conflict dialog that names who made the other change. | `RouteService`, `ConflictDialog` |
@@ -141,7 +141,7 @@ npm test         # 57 unit + integration tests
 
 ---
 
-## Tests (`npm test`, 57 cases)
+## Tests (`npm test`, 58 cases)
 
 | File | Covers |
 |---|---|

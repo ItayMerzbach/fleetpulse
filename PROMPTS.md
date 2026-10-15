@@ -55,7 +55,7 @@ Roughly the order of the brief's recommended phases. Each was a self-contained i
 5. *"Domain: presence reducer (ghost rules), route state machine, mergeRoute by version, conflict model, lastActor()."*
 6. *"Services + composition root; UI: header, list, SVG map, widget-registry detail panel, bottom tabs, conflict dialog, keyboard shortcuts."*
 7. *"Run it against the real server in the browser and try to break it."* ← this step found most of the bugs below.
-8. *"Tests: quirk-driven, minimum 8, prefer edge cases over 'renders'."* → 57 tests.
+8. *"Tests: quirk-driven, minimum 8, prefer edge cases over 'renders'."* → 57 tests (58 after §8).
 
 ---
 
@@ -114,15 +114,33 @@ This is the most important section. The AI's first draft contained these errors,
 - Markers are `L.divIcon` HTML with the same visual language. **Security note raised by the AI:** `divIcon` takes a raw HTML string, and dispatcher names are user input, so they are HTML-escaped. The icon is memoised on its appearance (status, heading, fault, viewers), so a position update doesn't rebuild the marker's DOM.
 - **AI mistake caught by checking in the browser:** the first tile choice (CARTO "Dark Matter", widely cited as keyless) rendered **"API KEY REQUIRED"** watermarks — the provider's terms have changed. Switched to the standard OpenStreetMap tile server with attribution, darkened via a CSS filter. A second issue: react-leaflet applies layer options only on creation, so the new CSS class only took effect after a full reload, not after hot reload.
 
-## 8. Verification performed (not just "tests pass")
+## 8. Follow-up prompt: a requirement that looked ignored (mine, verbatim)
+
+> Why did you ignore the task: "Handle GPS batch readings — don't render 30 map markers for one truck, show the path or latest position"
+
+**Honest assessment (AI's answer, which I verified):** the *data* side was done and tested (one time-sorted path, no backwards jump, one commit per batch), but the *map* had **two real defects**:
+1. The path was drawn **only for the selected truck**, so a batch for any other truck had no visible effect.
+2. For the selected truck, every late/batched fix was drawn as its **own dot**, so a 30-reading batch put up to 30 extra markers on the map. That is the exact thing the requirement forbids, introduced while trying to make batches "visible".
+
+**Why it slipped:** the unit tests asserted the processor's output (`trail` length, ordering) but nothing checked what the *map* draws, and the live check focused on markers moving rather than on what happens during a batch.
+
+**Fix:**
+- Every truck gets **one path polyline** (faint; the selected truck's is bold). The per-fix dots are removed.
+- The processor now records `lastBatch {count, receivedAt}`, and the truck marker shows a **"GPS +N"** badge for 10 s.
+- Added tests for `lastBatch`.
+- **Verified live** by waiting for a real batch from the server: "GPS +26" on Truck Lima, with the map still at 13 marker icons (12 trucks + depot), 12 path lines, and 0 per-reading dots.
+
+**Lesson:** test requirements against what the user actually *sees*, not only the data layer behind it.
+
+## 9. Verification performed (not just "tests pass")
 
 - **Live, in the browser, against the real mock server:** truck_7 shows *SENSOR FAULT · reported 999 km/h, showing last valid reading*. Fuel glitches are held as *SUSPECT* and logged "resolved after 4.0s — no action needed". GPS batches appear as hollow path points. Validation messages show on bad input. Route created; stale-version race reproduced and resolved through the dialog; the other dispatcher (`curl` as `omer-1a2b`) is shown by name, which comes from the id slug.
 - **Observability tab live:** ~0.4 SSE events/s, matching 0.4 store commits/s (one commit per message, as designed), WS RTT ≈1 ms, 0 handler errors.
-- `npm test` → 57/57; `tsc` strict → clean; `vite build` → OK; `npm start` from scratch starts both server and UI.
+- `npm test` → 58/58; `tsc` strict → clean; `vite build` → OK; `npm start` from scratch starts both server and UI.
 
 ---
 
-## 9. What I'd tell a reviewer about AI usage
+## 10. What I'd tell a reviewer about AI usage
 
 - I used AI for **speed**: boilerplate, schemas, CSS, and the first draft of every module. I kept **judgement** for myself: which quirk handling is correct, what the UX should say during a conflict, and which heuristic to drop.
 - The most valuable "prompts" were not code requests. They were *"run it against the real server and try to break it"*, which found 5.1 and 5.2, and *"write tests from the quirks, not from the implementation"*, which found 5.3 and exposed the bad assumption in 5.4. The AI's first draft passed a typecheck with all four defects still in it.

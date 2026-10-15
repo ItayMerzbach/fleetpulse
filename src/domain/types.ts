@@ -85,6 +85,8 @@ export interface VehicleTelemetry {
   engineTemp: SensorValue;
   trail: TrailPoint[];
   history: HistoryPoint[];
+  /** Most recent GPS batch merged for this vehicle (receive time, client clock). */
+  lastBatch: { count: number; receivedAt: number } | null;
 }
 
 export interface DispatcherIdentity {

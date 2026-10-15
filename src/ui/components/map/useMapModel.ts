@@ -6,6 +6,8 @@ import { useNow } from '../../hooks/useNow';
 
 export const DEPOT = { lat: 32.0853, lng: 34.7818 };
 const STALE_MS = 10_000;
+/** How long the "GPS +N" badge stays on a truck after a batch was merged. */
+const BATCH_BADGE_MS = 10_000;
 
 /**
  * Everything a map renderer needs, independent of HOW it draws (today
@@ -29,6 +31,8 @@ export function useMapModel() {
     trail,
     selectedRow,
     isStale: (lastTimestamp: number | undefined) => lastTimestamp !== undefined && now - lastTimestamp > STALE_MS,
+    recentBatch: (b: { count: number; receivedAt: number } | null | undefined) =>
+      b && now - b.receivedAt < BATCH_BADGE_MS ? b.count : null,
     select: app.selectTruck,
   };
 }

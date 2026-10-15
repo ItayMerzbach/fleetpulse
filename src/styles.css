@@ -232,4 +232,6 @@ kbd { background: var(--panel-2); border: 1px solid var(--border); border-radius
 .lf-label { position: absolute; top: 27px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 11px; font-weight: 600; color: #fff; background: rgba(11, 16, 22, 0.75); padding: 0 4px; border-radius: 3px; }
 .lf-fault { position: absolute; top: -2px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); border: 1px solid #0b1016; }
 .lf-viewers { position: absolute; left: 24px; top: -8px; display: flex; gap: 2px; }
+.lf-batch, .legend-batch { font-style: normal; font-size: 9px; font-weight: 700; color: #0b1016; background: var(--warn); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+.lf-batch { position: absolute; left: 22px; top: 14px; }
 .lf-depot { background: var(--accent); color: #0b1016; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; text-align: center; }

@@ -3,7 +3,7 @@ import { TelemetryProcessor } from '../../src/telemetry/TelemetryProcessor';
 import { createDefaultVehicleRegistry } from '../../src/vehicles/vehicleTypes';
 import { reading } from '../helpers';
 
-const make = () => new TelemetryProcessor(createDefaultVehicleRegistry(), { trailSize: 60, historySize: 150 });
+const make = () => new TelemetryProcessor(createDefaultVehicleRegistry(), { trailSize: 60, historySize: 150, now: () => 123_456 });
 
 describe('TelemetryProcessor — GPS batch (quirk #1)', () => {
   it('merges a 30-reading backlog into the path without moving the truck backwards', () => {
@@ -25,6 +25,15 @@ describe('TelemetryProcessor — GPS batch (quirk #1)', () => {
     expect(res.late).toBe(30);
     expect(res.updatedTruckIds).toEqual(new Set(['truck_1'])); // one commit for the whole batch
     expect(res.anomalies.filter((a) => a.kind === 'gps_batch')).toHaveLength(1);
+    // the map shows one "GPS +30" badge on the truck, not 30 markers
+    expect(snap.lastBatch).toEqual({ count: 30, receivedAt: 123_456 });
+    expect(snap.trail.filter((t) => t.source === 'batch')).toHaveLength(30);
+  });
+
+  it('live readings do not mark a batch', () => {
+    const p = make();
+    p.ingest([reading({ timestamp: 1000 }), reading({ timestamp: 3000 })]);
+    expect(p.snapshot('truck_1')!.lastBatch).toBeNull();
   });
 
   it('applies batch readings that are newer than current, in timestamp order', () => {

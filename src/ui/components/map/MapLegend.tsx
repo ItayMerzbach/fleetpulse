@@ -13,7 +13,10 @@ export function MapLegend({ trailCount, note }: { trailCount: number | null; not
       <span>
         <i className="legend-fault" /> sensor issue
       </span>
-      {trailCount !== null && <span className="muted">path: {trailCount} fixes (hollow = late/batched)</span>}
+      <span>
+        <i className="legend-batch">GPS +N</i> batch merged into path
+      </span>
+      {trailCount !== null && <span className="muted">selected path: {trailCount} fixes</span>}
       {note && <span className="text-warn">{note}</span>}
     </div>
   );

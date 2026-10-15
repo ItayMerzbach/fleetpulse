@@ -16,6 +16,7 @@ export interface ProcessorOptions {
   trailSize: number;
   /** Chart points kept per vehicle (~5 min at 2 s). */
   historySize: number;
+  now?: () => number;
 }
 
 export type ReadingSource = 'live' | 'batch';
@@ -45,6 +46,7 @@ interface VehicleState {
   sensors: Record<SensorKey, SensorSlot>;
   trail: SortedWindow<TrailPoint>;
   history: SortedWindow<HistoryPoint>;
+  lastBatch: { count: number; receivedAt: number } | null;
   snapshot: VehicleTelemetry | null;
 }
 
@@ -106,7 +108,11 @@ export class TelemetryProcessor {
       result.updatedTruckIds.add(v.truckId);
     }
 
+    const receivedAt = (this.options.now ?? Date.now)();
     for (const [truckId, count] of batchCounts) {
+      const v = this.vehicles.get(truckId)!;
+      v.lastBatch = { count, receivedAt };
+      v.snapshot = null;
       result.anomalies.push({
         truckId,
         kind: 'gps_batch',
@@ -148,6 +154,7 @@ export class TelemetryProcessor {
         engineTemp: v.sensors.engineTemp.output,
         trail: v.trail.toArray(),
         history: v.history.toArray(),
+        lastBatch: v.lastBatch,
       };
     }
     return v.snapshot;
@@ -201,6 +208,7 @@ export class TelemetryProcessor {
       sensors,
       trail: new SortedWindow(this.options.trailSize),
       history: new SortedWindow(this.options.historySize),
+      lastBatch: null,
       snapshot: null,
     };
     this.vehicles.set(truckId, v);

@@ -1,8 +1,9 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { memo, useMemo } from 'react';
-import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, Tooltip, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, TileLayer, Tooltip, useMapEvents } from 'react-leaflet';
 import type { PresenceEntry } from '../../../domain/presence';
+import type { TrailPoint } from '../../../domain/types';
 import { colorFor, initials } from '../../format';
 import type { TruckRow } from '../../hooks/useFleetView';
 import { MapLegend } from './MapLegend';
@@ -25,7 +26,6 @@ const depotIcon = L.divIcon({ className: 'lf-icon', html: '<div class="lf-depot"
  */
 export function LeafletFleetMap() {
   const m = useMapModel();
-  const late = m.trail.filter((p) => p.source === 'batch' || p.source === 'late');
 
   return (
     <div className="map-wrap">
@@ -34,11 +34,10 @@ export function LeafletFleetMap() {
         <DeselectOnMapClick onClick={() => m.select(null)} />
         <Marker position={DEPOT} icon={depotIcon} interactive={false} />
 
-        {m.trail.length > 1 && (
-          <Polyline positions={m.trail.map((p) => [p.lat, p.lng] as [number, number])} pathOptions={{ color: '#4ea1ff', weight: 3, opacity: 0.8 }} />
-        )}
-        {late.map((p) => (
-          <CircleMarker key={p.timestamp} center={[p.lat, p.lng]} radius={3.5} pathOptions={{ color: '#f5b942', weight: 1.5, fill: false }} interactive={false} />
+        {/* GPS batches / late fixes are merged into ONE time-ordered path per truck
+            (quirk #1) — never one marker per reading. Selected truck's path is emphasised. */}
+        {m.rows.map((r) => (
+          <TruckPath key={r.id} trail={r.telemetry?.trail} selected={r.id === m.selected} />
         ))}
 
         {m.rows.map((r) => (
@@ -48,6 +47,7 @@ export function LeafletFleetMap() {
             selected={r.id === m.selected}
             viewers={m.viewers[r.id]}
             stale={m.isStale(r.telemetry?.lastTimestamp)}
+            batchCount={m.recentBatch(r.telemetry?.lastBatch)}
             onSelect={m.select}
           />
         ))}
@@ -56,6 +56,18 @@ export function LeafletFleetMap() {
     </div>
   );
 }
+
+const TruckPath = memo(function TruckPath({ trail, selected }: { trail?: TrailPoint[]; selected: boolean }) {
+  const positions = useMemo(() => (trail ?? []).map((p) => [p.lat, p.lng] as [number, number]), [trail]);
+  if (positions.length < 2) return null;
+  return (
+    <Polyline
+      positions={positions}
+      interactive={false}
+      pathOptions={selected ? { color: '#4ea1ff', weight: 3.5, opacity: 0.9 } : { color: '#4ea1ff', weight: 2, opacity: 0.35 }}
+    />
+  );
+});
 
 function DeselectOnMapClick({ onClick }: { onClick: () => void }) {
   useMapEvents({ click: onClick });
@@ -67,12 +79,14 @@ const TruckMarker = memo(function TruckMarker({
   selected,
   viewers,
   stale,
+  batchCount,
   onSelect,
 }: {
   row: TruckRow;
   selected: boolean;
   viewers?: PresenceEntry[];
   stale: boolean;
+  batchCount: number | null;
   onSelect: (id: string) => void;
 }) {
   const t = row.telemetry;
@@ -96,10 +110,11 @@ const TruckMarker = memo(function TruckMarker({
         ${faulty ? '<span class="lf-fault"></span>' : ''}
         <span class="lf-label">${esc(label)}</span>
         ${avatars ? `<span class="lf-viewers">${avatars}</span>` : ''}
+        ${batchCount ? `<span class="lf-batch" title="GPS signal recovered: ${batchCount} buffered fixes merged into the path">GPS +${batchCount}</span>` : ''}
       </div>`,
     });
     // viewersKey stands in for `viewers` (a new array on every presence update)
-  }, [row.status, selected, stale, heading, faulty, label, viewersKey]);
+  }, [row.status, selected, stale, heading, faulty, label, viewersKey, batchCount]);
 
   if (!loc) return null;
   return (

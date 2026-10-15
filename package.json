@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "commonjs",
   "scripts": {
-    "start": "concurrently -k -n server,web -c blue,green \"node server.js\" \"vite --open\"",
+    "start": "vite --open",
     "server": "node server.js",
     "dev": "vite",
     "build": "tsc -b && vite build",
