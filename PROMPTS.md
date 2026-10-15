@@ -95,7 +95,17 @@ This is the most important section. The AI's first draft contained these errors,
 
 ---
 
-## 6. Verification performed (not just "tests pass")
+## 6. Follow-up prompt: switch to Google Maps (mine, verbatim)
+
+> This map is not valid; could you switch to using Google Maps?
+
+**What the AI did**
+- Pulled everything the map needs (filtered rows, selection, viewers, path, staleness) out of the SVG component into `useMapModel()`. Then wrote `GoogleFleetMap` (`@vis.gl/react-google-maps`, AdvancedMarkers with the same status colour, heading arrow, fault dot and viewer avatars; a Polyline for the path; hollow dots for late/batched fixes). The SVG map became `GridMap`.
+- **Key handling:** read from `VITE_GOOGLE_MAPS_API_KEY` in a git-ignored `.env.local`, with an `.env.example` committed. No key is in the repo.
+- **Critical point raised by the AI:** a reviewer who runs `npm start` without a key would otherwise get a grey "For development purposes only" map or nothing at all. So the grid stays as a fallback for three cases: no key, script load failure (`onError`), and a rejected key. Google reports the last one through the global `gm_authFailure` callback, not through the loader's promise, which is easy to miss.
+- **Verified:** no key → grid with a legend note. Deliberately invalid placeholder key → Google script loads, rejects the key, app falls back with "Google Maps rejected the API key". The real-key rendering has to be checked with my own key, since the AI did not create or handle credentials.
+
+## 7. Verification performed (not just "tests pass")
 
 - **Live, in the browser, against the real mock server:** truck_7 shows *SENSOR FAULT · reported 999 km/h, showing last valid reading*. Fuel glitches are held as *SUSPECT* and logged "resolved after 4.0s — no action needed". GPS batches appear as hollow path points. Validation messages show on bad input. Route created; stale-version race reproduced and resolved through the dialog; the other dispatcher (`curl` as `omer-1a2b`) is shown by name, which comes from the id slug.
 - **Observability tab live:** ~0.4 SSE events/s, matching 0.4 store commits/s (one commit per message, as designed), WS RTT ≈1 ms, 0 handler errors.
@@ -103,7 +113,7 @@ This is the most important section. The AI's first draft contained these errors,
 
 ---
 
-## 7. What I'd tell a reviewer about AI usage
+## 8. What I'd tell a reviewer about AI usage
 
 - I used AI for **speed**: boilerplate, schemas, CSS, and the first draft of every module. I kept **judgement** for myself: which quirk handling is correct, what the UX should say during a conflict, and which heuristic to drop.
 - The most valuable "prompts" were not code requests. They were *"run it against the real server and try to break it"*, which found 5.1 and 5.2, and *"write tests from the quirks, not from the implementation"*, which found 5.3 and exposed the bad assumption in 5.4. The AI's first draft passed a typecheck with all four defects still in it.

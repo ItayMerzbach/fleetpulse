@@ -2,7 +2,7 @@
 
 A real-time dashboard for 12 delivery trucks, built so dispatchers can **trust** what they see: it filters out sensor bugs, holds up under an unreliable API, and stops dispatchers from silently overwriting each other's changes.
 
-React 19 · TypeScript · Vite · Vitest · zod. No state-management or chart libraries; the map is a plain SVG coordinate grid.
+React 19 · TypeScript · Vite · Vitest · zod · Google Maps (`@vis.gl/react-google-maps`). No state-management or chart libraries.
 
 ---
 
@@ -15,6 +15,7 @@ npm test         # 57 unit + integration tests
 ```
 
 - Requires Node 20+.
+- **Google Maps:** copy `.env.example` to `.env.local` (git-ignored) and set `VITE_GOOGLE_MAPS_API_KEY` (a key with the *Maps JavaScript API* enabled). `VITE_GOOGLE_MAPS_MAP_ID` is optional; Google's `DEMO_MAP_ID` is used by default, and Advanced Markers need one. **Without a key, or if Google rejects it**, the map falls back to an offline SVG grid with a note in the legend, so `npm start` always works.
 - If port 5173 is busy, Vite picks the next free port; check the console for the URL.
 - **To test with several dispatchers**, open a second tab and sign in under a different name. Identity is stored in `sessionStorage`, so each tab is its own dispatcher.
 - To reset the server: `curl -X POST localhost:3000/api/reset`
@@ -64,6 +65,7 @@ npm test         # 57 unit + integration tests
 
 ### Extensibility
 - **New vehicle type** (EV van, reefer truck): register a `VehicleTypeDefinition` in `src/vehicles/vehicleTypes.ts`, with its own thresholds, its own `SensorFilter`s and a `matches()` predicate. The pipeline, stores and UI don't change.
+- **Map provider:** `useMapModel()` provides rows, selection, presence viewers, path and staleness. `GoogleFleetMap` and `GridMap` only render that model, so swapping provider (e.g. Mapbox) doesn't touch any data code.
 - **New detail widget:** one component plus one `register()` call in `src/ui/widgets/index.ts`. A widget can limit itself to certain vehicle types with `appliesTo`.
 - **New sensor rule:** implement `SensorFilter<S>`, a pure `(state, raw, ctx) → {state, output, anomalies}` reducer.
 
@@ -170,7 +172,7 @@ npm test         # 57 unit + integration tests
 
 1. Server: `If-Match` on reassign, a presence snapshot on connect, an audit/history endpoint, ack for alerts, and typed `event:` names on SSE.
 2. Geofencing (zones as another `SensorFilter`-style rule over location).
-3. A real map (Leaflet) with marker clustering; a canvas renderer for hundreds of vehicles.
+3. Marker clustering and a WebGL/deck.gl overlay for hundreds of vehicles; snapping GPS paths to roads (Roads API).
 4. Playwright e2e running two browser contexts against the real mock server for the conflict flow.
 5. Send metrics to a backend (OpenTelemetry) and alert on breaker-open rate, 409 rate, SSE reconnects and stale-truck count. Those are what I'd watch in production.
 6. Cross-sensor checks: speed vs. GPS displacement to detect frozen speedometers properly.
