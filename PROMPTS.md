@@ -183,6 +183,8 @@ The AI re-read the whole brief line by line against the code. The 8-test minimum
 
 Also checked and documented: which listed endpoints are intentionally unused (`/api/telemetry/history`, `ping`, `/api/reset`).
 
+**Found by cloning the repo fresh and running it as a reviewer would:** the `start` script had been changed to only `vite --open` (my own edit to `package.json`), so the mock server is started separately with `npm run server`. The AI flagged that the brief asks for `npm install && npm start`; I chose to keep the two-step start, and the README setup now says so. The AI also admitted it had swept that edit into an unrelated commit with `git add -A` without noticing.
+
 ## 11. Verification performed (current version)
 
 - `npm test` → 26/26. `tsc` strict → clean. `vite build` → OK.

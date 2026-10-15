@@ -6,8 +6,9 @@ A deliberately minimal dashboard for 12 trucks: live map, route assignment with 
 
 ```bash
 npm install
-npm start   # mock server on :3000 + dashboard (Vite prints the URL, normally :5173)
-npm test    # 26 unit tests
+npm run server   # terminal 1: mock server on :3000
+npm start        # terminal 2: dashboard (opens the browser; Vite prints the URL, normally :5173)
+npm test         # 26 unit tests
 ```
 
 To act as several dispatchers, open a second tab and sign in with another name. Each tab is a separate dispatcher (identity lives in `sessionStorage`). To reset the server: `curl -X POST localhost:3000/api/reset`.
