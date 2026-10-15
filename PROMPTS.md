@@ -4,6 +4,8 @@
 
 **How AI was used:** as an implementation partner working under my direction. I gave one task-level prompt. The agent then planned, built, ran the app against the real mock server, wrote tests, and reported back. I asked it to check with me on decisions where an unexpected problem came up. Every interesting step below includes what the AI did, what turned out to be **wrong**, and how it was caught.
 
+> Note: §3–§8 describe the first, larger version. §9 explains how it was cut down to the current minimal one.
+
 > Rule I followed: nothing counts as done until it has run against the real mock server or a test. Several AI-generated pieces looked right and were not (see §5).
 
 ---
@@ -132,16 +134,52 @@ This is the most important section. The AI's first draft contained these errors,
 
 **Lesson:** test requirements against what the user actually *sees*, not only the data layer behind it.
 
-## 9. Verification performed (not just "tests pass")
+## 9. Follow-up prompt: simplify everything (mine, verbatim)
 
-- **Live, in the browser, against the real mock server:** truck_7 shows *SENSOR FAULT · reported 999 km/h, showing last valid reading*. Fuel glitches are held as *SUSPECT* and logged "resolved after 4.0s — no action needed". GPS batches appear as hollow path points. Validation messages show on bad input. Route created; stale-version race reproduced and resolved through the dialog; the other dispatcher (`curl` as `omer-1a2b`) is shown by name, which comes from the id slug.
-- **Observability tab live:** ~0.4 SSE events/s, matching 0.4 store commits/s (one commit per message, as designed), WS RTT ≈1 ms, 0 handler errors.
-- `npm test` → 58/58; `tsc` strict → clean; `vite build` → OK; `npm start` from scratch starts both server and UI.
+> Now, I'd like you to simplify the UI—keep it much more basic, implementing only what was requested and nothing more. (I need to be able to stand behind the code and fully understand everything, so I want a minimalist approach.)
 
----
+The AI asked two clarifying questions before starting, because the answers changed the scope a lot. My answers:
+- **Bonus features:** remove all of them (circuit breaker / degraded mode, anomaly dashboard, observability panel, keyboard shortcuts, filters, side-by-side conflict dialog).
+- **Scope:** simplify the non-UI code too, not just the React layer.
 
-## 10. What I'd tell a reviewer about AI usage
+**Result:** a rewrite from ~60 files to 13 source files (~1,100 lines including types and comments). §3–§8 above describe the first, larger version and are kept as the history of how I got here.
 
-- I used AI for **speed**: boilerplate, schemas, CSS, and the first draft of every module. I kept **judgement** for myself: which quirk handling is correct, what the UX should say during a conflict, and which heuristic to drop.
-- The most valuable "prompts" were not code requests. They were *"run it against the real server and try to break it"*, which found 5.1 and 5.2, and *"write tests from the quirks, not from the implementation"*, which found 5.3 and exposed the bad assumption in 5.4. The AI's first draft passed a typecheck with all four defects still in it.
-- Every design decision in the README is one I can defend without the AI. The trade-offs (reassign race, presence before join, in-memory audit) are stated as limitations rather than hidden.
+| Before | After |
+|---|---|
+| Typed event bus, custom stores, composition root, 5 services | One hook, `useFleetPulse.ts`, using plain React state |
+| Vehicle-type and widget plugin registries | Plain components |
+| zod schemas for every payload | A small `isValidReading` check, plus form validation |
+| Sensor filters as reducer plugins and a processor class | Two pure functions, `filterSpeed` and `filterFuel`, plus `applyReadings` |
+| Circuit breaker, backoff, watchdog, ping/pong | `withRetry` (Retry-After) for 503s; EventSource's own reconnect; WS reconnect after 2 s |
+| Conflict dialog with three columns | A message naming who changed the route and its new state |
+| 58 tests (with DOM / integration) | 22 pure unit tests covering every required area |
+
+**What was deliberately kept** (each is a requirement):
+- Event-time ordering, and merging GPS batches into a single path.
+- Speed and fuel filtering, with low fuel computed only from trusted values.
+- `If-Match` on every PATCH, and on 409 re-fetching to name *who* changed the route (using all of assign, update and reassign).
+- Version check before reassigning.
+- Ghost-safe presence reducer, and re-announcing ourselves when someone joins.
+- Confirmation dialogs (`window.confirm`), input validation, error boundaries.
+
+**AI bug caught while verifying the rewrite:** the route-create form and the alert form were siblings that both used `key={truckId}`. After creating a route, React left the old form on screen next to the new route card. It was found by inspecting the DOM in the browser, confirmed by React's "two children with the same key" console error, and fixed with distinct keys.
+
+**Verified live against the mock server:**
+- 12 trucks, with exactly one marker and one path line each.
+- Fuel glitch shown as "(checking sensor)".
+- Validation message for a short destination.
+- Route creation works.
+- A real race, where "Omer" PATCHes while Dana's confirm dialog is open, produces "route_1 was changed by Omer … your change was not applied", the refreshed route card, and two log entries.
+- Reassignment works.
+- Closing four stale browser tabs removed their presence entries, ghost delays included.
+
+## 10. Verification performed (current version)
+
+- `npm test` → 22/22. `tsc` strict → clean. `vite build` → OK.
+- Every requirement in the brief was checked in the browser against the real mock server (see §9).
+
+## 11. What I'd tell a reviewer about AI usage
+
+- I used AI for **speed**: drafting code, wiring, tests. I kept **judgement** for myself: what the quirk handling should do, what the dispatcher sees in a conflict, which heuristics to drop, and finally how much code is worth having at all.
+- The most valuable prompts were not code requests. They were *"run it against the real server and try to break it"*, *"why does this requirement look ignored?"*, and *"make it small enough that I can defend every line."* Each one exposed problems that typecheck and the unit tests had passed.
+- The first version was over-engineered for a 4–8 hour task. Simplifying it was a deliberate decision, made so that every line is one I can explain in the review.

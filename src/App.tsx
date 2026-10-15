@@ -1,152 +1,86 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { createFleetPulse, type FleetPulse } from './app/createFleetPulse';
-import { config } from './config';
-import { clearIdentity, createDispatcherIdentity, loadIdentity, saveIdentity } from './domain/dispatcher';
-import { DispatcherNameSchema } from './domain/schemas';
-import type { DispatcherIdentity } from './domain/types';
-import { BottomPanel } from './ui/components/BottomPanel';
-import { DetailPanel } from './ui/components/DetailPanel';
-import { ConfirmProvider, Modal, ToastProvider } from './ui/components/Dialogs';
-import { ErrorBoundary } from './ui/components/ErrorBoundary';
-import { FleetList } from './ui/components/FleetList';
-import { FleetMap } from './ui/components/FleetMap';
-import { Header } from './ui/components/Header';
-import { RouteActionsProvider } from './ui/components/RouteActions';
-import { FleetPulseProvider, useFleetPulse, useStore } from './ui/context';
-import { useTruckRows } from './ui/hooks/useFleetView';
-import { SHORTCUTS, useKeyboardShortcuts } from './ui/hooks/useKeyboardShortcuts';
+import { useState, type FormEvent } from 'react';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { FleetMap } from './components/FleetMap';
+import { RoutesPanel } from './components/RoutesPanel';
+import { TruckDetail } from './components/TruckDetail';
+import { TruckList } from './components/TruckList';
+import { createDispatcherId } from './presence';
+import { useFleetPulse, type Identity } from './useFleetPulse';
+
+// sessionStorage (not localStorage): each browser tab is a separate dispatcher.
+const STORAGE_KEY = 'fleetpulse.identity';
 
 export default function App() {
-  const [identity, setIdentity] = useState<DispatcherIdentity | null>(() => loadIdentity());
+  const [identity, setIdentity] = useState<Identity | null>(() => JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? 'null'));
+
   if (!identity) {
     return (
       <Login
-        onLogin={(id) => {
-          saveIdentity(id);
+        onLogin={(name) => {
+          const id = { id: createDispatcherId(name), name };
+          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(id));
           setIdentity(id);
         }}
       />
     );
   }
-  return (
-    <Session
-      key={identity.id}
-      identity={identity}
-      onSignOut={() => {
-        clearIdentity();
-        setIdentity(null);
-      }}
-    />
-  );
+  return <Dashboard identity={identity} />;
 }
 
-function Login({ onLogin }: { onLogin: (id: DispatcherIdentity) => void }) {
+function Login({ onLogin }: { onLogin: (name: string) => void }) {
   const [name, setName] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const submit = (e: FormEvent) => {
+  const [error, setError] = useState('');
+
+  function submit(e: FormEvent) {
     e.preventDefault();
-    const parsed = DispatcherNameSchema.safeParse(name);
-    if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? 'Invalid name');
-    onLogin(createDispatcherIdentity(parsed.data));
-  };
+    const trimmed = name.trim();
+    if (trimmed.length < 2 || trimmed.length > 30) return setError('Name must be 2–30 characters');
+    onLogin(trimmed);
+  }
+
   return (
-    <div className="login">
-      <form className="login-card" onSubmit={submit} noValidate>
-        <h1>🚛 FleetPulse</h1>
-        <p className="muted">Identify yourself so other dispatchers can see who changed what.</p>
-        <input className="input" autoFocus placeholder="Your name" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} />
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <button className="btn btn-primary">Start dispatching</button>
-        <p className="muted small">Tip: open a second tab and sign in with another name to test multi-dispatcher conflicts.</p>
-      </form>
-    </div>
+    <form className="login" onSubmit={submit}>
+      <h2>FleetPulse</h2>
+      <input autoFocus placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
+      <button>Start</button>
+      {error && <p className="bad">{error}</p>}
+    </form>
   );
 }
 
-/** Owns the FleetPulse instance lifecycle (created on mount, fully torn down on unmount). */
-function Session({ identity, onSignOut }: { identity: DispatcherIdentity; onSignOut: () => void }) {
-  const [app, setApp] = useState<FleetPulse | null>(null);
-  useEffect(() => {
-    const instance = createFleetPulse({ apiBaseUrl: config.apiBaseUrl, wsUrl: config.wsUrl, identity });
-    instance.start();
-    setApp(instance);
-    return () => instance.stop();
-  }, [identity]);
-
-  if (!app) return null;
-  return (
-    <FleetPulseProvider app={app}>
-      <ToastProvider>
-        <ConfirmProvider>
-          <RouteActionsProvider>
-            <Dashboard onSignOut={onSignOut} />
-          </RouteActionsProvider>
-        </ConfirmProvider>
-      </ToastProvider>
-    </FleetPulseProvider>
-  );
-}
-
-function Dashboard({ onSignOut }: { onSignOut: () => void }) {
-  const app = useFleetPulse();
-  const rows = useTruckRows();
-  const rowsRef = useRef(rows);
-  rowsRef.current = rows;
-  const getRows = useCallback(() => rowsRef.current, []);
-  useKeyboardShortcuts(app, getRows);
-  const showHelp = useStore(app.stores.ui, (s) => s.showHelp);
-  const source = useStore(app.stores.fleet, (s) => s.source);
+function Dashboard({ identity }: { identity: Identity }) {
+  const fp = useFleetPulse(identity);
+  const others = Object.values(fp.presence.others);
 
   return (
     <div className="layout">
-      <Header onSignOut={onSignOut} />
-      {source.mode === 'degraded' && (
-        <div className="banner banner-warn" role="status">
-          ⚠ Fleet API is unavailable — showing cached fleet data (stale). Live positions continue via telemetry. {source.error}
-        </div>
-      )}
-      {source.mode === 'error' && (
-        <div className="banner banner-bad" role="alert">
-          Fleet API unreachable and no cached data. Live telemetry is shown where available.{' '}
-          <button className="btn btn-xs" onClick={() => void app.fleet.sync()}>
-            Retry now
-          </button>
-        </div>
-      )}
-      <main className="main">
-        <ErrorBoundary name="Fleet list">
-          <FleetList />
+      <header>
+        <b>FleetPulse</b>
+        <span>
+          You: {identity.name} · telemetry {fp.connected.telemetry ? '🟢' : '🔴'} · dispatch {fp.connected.dispatch ? '🟢' : '🔴'}
+        </span>
+        <span>
+          Online:{' '}
+          {others.length === 0
+            ? 'only you'
+            : others.map((d) => `${d.name}${d.viewingTruckId ? ` (viewing ${fp.truckNames[d.viewingTruckId] ?? d.viewingTruckId})` : ''}`).join(', ')}
+        </span>
+      </header>
+      {fp.fleetError && <div className="bad banner">{fp.fleetError}</div>}
+      <main>
+        <ErrorBoundary name="Truck list">
+          <TruckList fp={fp} />
         </ErrorBoundary>
         <ErrorBoundary name="Map">
-          <FleetMap />
+          <FleetMap fp={fp} />
         </ErrorBoundary>
-        <ErrorBoundary name="Vehicle detail">
-          <DetailPanel />
+        <ErrorBoundary name="Truck detail">
+          <TruckDetail fp={fp} />
         </ErrorBoundary>
       </main>
-      <ErrorBoundary name="Panels">
-        <BottomPanel />
+      <ErrorBoundary name="Routes">
+        <RoutesPanel fp={fp} />
       </ErrorBoundary>
-      {showHelp && (
-        <Modal title="Keyboard shortcuts" onClose={() => app.stores.ui.setState((u) => ({ ...u, showHelp: false }))}>
-          <table className="table">
-            <tbody>
-              {SHORTCUTS.map(([k, d]) => (
-                <tr key={k}>
-                  <td>
-                    <kbd>{k}</kbd>
-                  </td>
-                  <td>{d}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Modal>
-      )}
     </div>
   );
 }
