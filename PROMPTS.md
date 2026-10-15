@@ -185,12 +185,38 @@ Also checked and documented: which listed endpoints are intentionally unused (`/
 
 **Found by cloning the repo fresh and running it as a reviewer would:** the `start` script had been changed to only `vite --open` (my own edit to `package.json`), so the mock server is started separately with `npm run server`. The AI flagged that the brief asks for `npm install && npm start`; I chose to keep the two-step start, and the README setup now says so. The AI also admitted it had swept that edit into an unrelated commit with `git add -A` without noticing.
 
-## 11. Verification performed (current version)
+## 11. Follow-up prompts: the ghost-presence refresh bug (mine, two iterations)
 
-- `npm test` → 26/26. `tsc` strict → clean. `vite build` → OK.
+**The bug I found:** when another dispatcher refreshes and reconnects with the same id, the delayed `dispatcher_left` from their **old** connection (quirk #6, ~10 s late) arrived after their new join and removed them while they were online. The server's timestamp on that leave is set *after* the delay, so it can't be used to tell the two connections apart.
+
+**Iteration 1 (my prompt, summarised):** store `joinedAt` (local arrival time) per dispatcher and ignore any leave arriving < 11 s after it, passing `now` into the reducer so it stays pure.
+- The AI implemented it. It also noticed the activity log would still print "X went offline" for an ignored ghost, and fixed that.
+- It flagged the trade-off: a dispatcher who *really* leaves within 11 s has the leave ignored, and with no expiry they'd stay listed forever.
+- I didn't commit this version.
+
+**Iteration 2 (my prompt, summarised):** use the same "suspect" pattern as the fuel filter instead of ignoring:
+- keep `lastSeenAt` (updated on join, viewing, and any route/alert action they perform);
+- a leave < 11 s after it marks them **uncertain** (shown greyed, "connection uncertain") instead of removing them;
+- any activity puts them back online;
+- an uncertain dispatcher silent for 60 s is removed via a pure `tick` event;
+- a leave ≥ 11 s after their last activity removes them immediately.
+
+**AI's interpretation choices, which I accepted:**
+- Route/alert activity only refreshes dispatchers already in the list, so a `curl` user doesn't appear "online".
+- All presence events go through one `applyPresence` helper in the hook, which logs "went offline" only when someone is actually removed (by a leave or by the timeout).
+
+**Tests:** left within 11 s → uncertain; activity → online again; 60 s without activity → removed (59 s → still there); left after 11 s → removed immediately; tick never removes online dispatchers; unknown activity is ignored.
+
+**Verified live:** Dana watched while Omer refreshed his tab 5 times. Omer was never dropped, and no false "went offline" was logged. A real 10 s ghost leave arrived and showed him greyed as "connection uncertain" instead of removing him.
+
+**Remaining trade-off (in the README):** someone who refreshes and then stays idle is shown as uncertain after a ghost leave, and drops off after 60 s until their next action. The server sends no presence heartbeat, so the client can't distinguish "refreshed and idle" from "really gone".
+
+## 12. Verification performed (current version)
+
+- `npm test` → 30/30. `tsc` strict → clean. `vite build` → OK.
 - Every requirement in the brief was checked in the browser against the real mock server (see §9).
 
-## 12. What I'd tell a reviewer about AI usage
+## 13. What I'd tell a reviewer about AI usage
 
 - I used AI for **speed**: drafting code, wiring, tests. I kept **judgement** for myself: what the quirk handling should do, what the dispatcher sees in a conflict, which heuristics to drop, and finally how much code is worth having at all.
 - The most valuable prompts were not code requests. They were *"run it against the real server and try to break it"*, *"why does this requirement look ignored?"*, and *"make it small enough that I can defend every line."* Each one exposed problems that typecheck and the unit tests had passed.

@@ -63,7 +63,14 @@ function Dashboard({ identity }: { identity: Identity }) {
           Online:{' '}
           {others.length === 0
             ? 'only you'
-            : others.map((d) => `${d.name}${d.viewingTruckId ? ` (viewing ${fp.truckNames[d.viewingTruckId] ?? d.viewingTruckId})` : ''}`).join(', ')}
+            : others.map((d, i) => (
+                <span key={d.id} className={d.status === 'uncertain' ? 'muted' : ''}>
+                  {i > 0 && ', '}
+                  {d.name}
+                  {d.viewingTruckId && ` (viewing ${fp.truckNames[d.viewingTruckId] ?? d.viewingTruckId})`}
+                  {d.status === 'uncertain' && ' (connection uncertain)'}
+                </span>
+              ))}
         </span>
       </header>
       {fp.fleetError && <div className="bad banner">{fp.fleetError}</div>}

@@ -5,46 +5,76 @@ export interface PresenceState {
   others: Record<string, Dispatcher>;
 }
 
+/** `now` is the local arrival time of the event, passed in so the reducer stays pure. */
 export type PresenceEvent =
-  | { type: 'joined'; dispatcherId: string; name: string }
-  | { type: 'left'; dispatcherId: string }
-  | { type: 'viewing'; dispatcherId: string | null; truckId: string | null };
+  | { type: 'joined'; dispatcherId: string; name: string; now: number }
+  | { type: 'viewing'; dispatcherId: string | null; truckId: string | null; now: number }
+  /** The dispatcher did something (route change, alert) — proof they're online. */
+  | { type: 'activity'; dispatcherId: string | undefined; now: number }
+  | { type: 'left'; dispatcherId: string; now: number }
+  /** Periodic clock tick, used to drop uncertain dispatchers that went quiet. */
+  | { type: 'tick'; now: number };
+
+/** The server's ghost `dispatcher_left` arrives ~10 s after the old connection closed. */
+export const GHOST_LEAVE_WINDOW_MS = 11_000;
+/** An uncertain dispatcher with no activity for this long is removed. */
+export const UNCERTAIN_TIMEOUT_MS = 60_000;
 
 /**
  * Who else is online and which truck they're looking at.
  *
- * Ghost handling (the server may send `dispatcher_left` up to 10 s late):
- *  - a leave for someone we don't know is ignored (no crash, no change);
- *  - a leave for ourselves is ignored (it's our old connection, we reconnected);
- *  - any later "viewing" message brings a dispatcher back, so a late leave
- *    can't hide someone who is actually online.
+ * Ghost handling (quirk #6). When someone refreshes and reconnects with the same
+ * id, the leave of their OLD connection arrives ~10 s late, after the new join.
+ * The server's timestamp on the leave is set after the delay, so we use our own
+ * arrival times (`lastSeenAt`), the same "suspect" idea as the fuel filter:
+ *  - a leave < 11 s after we last saw them → 'uncertain' (shown greyed), not removed;
+ *  - any activity from them → 'online' again;
+ *  - uncertain and silent for 60 s → removed (on 'tick');
+ *  - a leave ≥ 11 s after we last saw them → removed immediately.
+ * Leaves for ourselves (our old connection) or for unknown ids are ignored.
  */
 export function presenceReducer(state: PresenceState, event: PresenceEvent): PresenceState {
+  const update = (d: Dispatcher) => ({ ...state, others: { ...state.others, [d.id]: d } });
+
   switch (event.type) {
     case 'joined': {
       if (event.dispatcherId === state.selfId) return state;
       const prev = state.others[event.dispatcherId];
-      return {
-        ...state,
-        others: {
-          ...state.others,
-          [event.dispatcherId]: { id: event.dispatcherId, name: event.name, viewingTruckId: prev?.viewingTruckId ?? null },
-        },
-      };
+      return update({
+        id: event.dispatcherId,
+        name: event.name,
+        viewingTruckId: prev?.viewingTruckId ?? null,
+        status: 'online',
+        lastSeenAt: event.now,
+      });
     }
     case 'viewing': {
       const id = event.dispatcherId;
       if (!id || id === state.selfId) return state;
       const prev = state.others[id];
-      return {
-        ...state,
-        others: { ...state.others, [id]: { id, name: prev?.name ?? nameFromId(id), viewingTruckId: event.truckId } },
-      };
+      return update({ id, name: prev?.name ?? nameFromId(id), viewingTruckId: event.truckId, status: 'online', lastSeenAt: event.now });
+    }
+    case 'activity': {
+      // Only refreshes dispatchers we already know: an API call alone doesn't prove a live connection.
+      const prev = event.dispatcherId ? state.others[event.dispatcherId] : undefined;
+      if (!prev) return state;
+      return update({ ...prev, status: 'online', lastSeenAt: event.now });
     }
     case 'left': {
-      if (event.dispatcherId === state.selfId || !state.others[event.dispatcherId]) return state;
+      const prev = state.others[event.dispatcherId];
+      if (event.dispatcherId === state.selfId || !prev) return state;
+      if (event.now - prev.lastSeenAt < GHOST_LEAVE_WINDOW_MS) return update({ ...prev, status: 'uncertain' });
       const others = { ...state.others };
       delete others[event.dispatcherId];
+      return { ...state, others };
+    }
+    case 'tick': {
+      const expired = Object.values(state.others).filter(
+        (d) => d.status === 'uncertain' && event.now - d.lastSeenAt >= UNCERTAIN_TIMEOUT_MS,
+      );
+      if (expired.length === 0) return state;
+      const others = { ...state.others };
+      for (const d of expired) delete others[d.id];
       return { ...state, others };
     }
   }

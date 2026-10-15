@@ -8,7 +8,7 @@ A deliberately minimal dashboard for 12 trucks: live map, route assignment with 
 npm install
 npm run server   # terminal 1: mock server on :3000
 npm start        # terminal 2: dashboard (opens the browser; Vite prints the URL, normally :5173)
-npm test         # 26 unit tests
+npm test         # 30 unit tests
 ```
 
 To act as several dispatchers, open a second tab and sign in with another name. Each tab is a separate dispatcher (identity lives in `sessionStorage`). To reset the server: `curl -X POST localhost:3000/api/reset`.
@@ -62,7 +62,7 @@ All logic that decides *what is true* (ordering, filtering, conflicts, presence)
 | 3 | truck_7 speed 999 km/h | Values above 160 km/h (or negative/NaN) are rejected. The last valid speed is shown with "speed sensor fault", and the chart shows a gap. |
 | 4 | 409 on version mismatch | Every PATCH sends `If-Match` with the version the dispatcher was looking at. On 409, `changeStatusSafely` re-fetches routes and shows who changed the route and its new state. Nothing is overwritten. |
 | 5 | Out-of-order readings | Same rule as #1: a reading older than the truck's latest never overrides it. |
-| 6 | Ghost presence (leave 10 s late) | A leave for an unknown dispatcher or for ourselves is ignored. Later activity re-adds a dispatcher. When someone joins, we re-announce what we're viewing. |
+| 6 | Ghost presence (leave 10 s late) | We keep `lastSeenAt` (local arrival time of their join, viewing, route change or alert). A leave arriving **< 11 s** after that might be the ghost of an old connection (refresh with the same id), so they're marked **uncertain** and shown greyed with "(connection uncertain)" instead of being removed. Any activity makes them online again. Uncertain and silent for **60 s** → removed. A leave **≥ 11 s** after their last activity removes them immediately. The server's timestamp on the leave isn't usable because it's set after the delay. Leaves for ourselves or for unknown ids are ignored. When someone joins, we re-announce what we're viewing. |
 | 7 | `GET /api/fleet` 503 + Retry-After | `withRetry` waits Retry-After seconds (otherwise 1/2/4 s), up to 3 retries. If that fails, an error banner is shown; live telemetry still works. |
 | 8 | PATCH races a reassign | Same 409 path. The "who" comes from the re-fetched route's assign/update/reassign timestamps, because the 409 body misses reassignments. |
 
@@ -81,6 +81,7 @@ All logic that decides *what is true* (ordering, filtering, conflicts, presence)
 - The activity log only covers events since the page was opened (the server has no history endpoint).
 - Dispatchers who were online before you joined appear once they view a truck, or when anyone joins.
 - A dispatcher who really closed their tab still shows for up to 10 s (the server's ghost delay).
+- A dispatcher who really leaves within 11 s of their last activity is shown as "(connection uncertain)" for up to 60 s before disappearing. Equally, someone who refreshed but then stays idle (no truck change, no route action) for 60 s is dropped from the list until their next activity, because the server sends no presence heartbeat.
 - OpenStreetMap's public tiles are fine for development only. Some trucks appear in the sea because the simulator ignores the coastline.
 - Server URLs are hard-coded to `localhost:3000`.
 

@@ -67,6 +67,10 @@ export interface Dispatcher {
   id: string;
   name: string;
   viewingTruckId: string | null;
+  /** 'uncertain' = a leave arrived too soon after their last activity to trust it (maybe a ghost). */
+  status: 'online' | 'uncertain';
+  /** Local time of their last join / viewing / route change / alert. */
+  lastSeenAt: number;
 }
 
 export interface LogEntry {

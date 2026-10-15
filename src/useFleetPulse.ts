@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ApiError, createApi } from './api';
-import { nameFromId, presenceReducer } from './presence';
+import { nameFromId, presenceReducer, type PresenceEvent } from './presence';
 import { changeStatusSafely, mergeRoute, reassignSafely, type ChangeResult } from './routes';
 import { applyReadings, isValidReading } from './telemetry';
 import type { LogEntry, Route, RouteStatus, Truck } from './types';
@@ -37,6 +37,8 @@ export function useFleetPulse(identity: Identity) {
   const [fleetError, setFleetError] = useState<string | null>(null);
   const [routes, setRoutes] = useState<Record<string, Route>>({});
   const [presence, dispatchPresence] = useReducer(presenceReducer, { selfId: identity.id, others: {} });
+  const presenceRef = useRef(presence); // lets the WebSocket handler read the latest presence
+  presenceRef.current = presence;
   const [log, setLog] = useState<LogEntry[]>([]);
   const [connected, setConnected] = useState({ telemetry: false, dispatch: false });
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(null);
@@ -50,6 +52,15 @@ export function useFleetPulse(identity: Identity) {
 
   const addLog = (text: string) =>
     setLog((prev) => [{ id: Date.now() + Math.random(), timestamp: Date.now(), text }, ...prev].slice(0, 200));
+
+  /** Every presence change goes through here, so real departures get logged (ghosts only turn 'uncertain'). */
+  const applyPresence = (event: PresenceEvent) => {
+    const prev = presenceRef.current;
+    const next = presenceReducer(prev, event);
+    for (const id of Object.keys(prev.others)) if (!next.others[id]) addLog(`${nameOf(id)} went offline`);
+    presenceRef.current = next; // keep the ref current if several events arrive before the next render
+    dispatchPresence(event);
+  };
 
   const sendViewing = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -86,6 +97,12 @@ export function useFleetPulse(identity: Identity) {
     return () => es.close();
   }, []);
 
+  // Clock for presence: drops 'uncertain' dispatchers that stayed silent for 60 s.
+  useEffect(() => {
+    const timer = setInterval(() => applyPresence({ type: 'tick', now: Date.now() }), 5000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Dispatcher WebSocket: presence + route updates from everyone. Reconnects after 2 s.
   useEffect(() => {
     let stopped = false;
@@ -95,30 +112,33 @@ export function useFleetPulse(identity: Identity) {
       switch (msg?.type) {
         case 'dispatcher_joined':
           dispatcherNames.current[msg.dispatcherId] = msg.name;
-          dispatchPresence({ type: 'joined', dispatcherId: msg.dispatcherId, name: msg.name });
+          applyPresence({ type: 'joined', dispatcherId: msg.dispatcherId, name: msg.name, now: Date.now() });
           sendViewing(); // the newcomer doesn't know about us yet — announce ourselves
           addLog(`${msg.name} came online`);
           break;
         case 'dispatcher_left':
-          if (msg.dispatcherId !== identity.id) addLog(`${nameOf(msg.dispatcherId)} went offline`);
-          dispatchPresence({ type: 'left', dispatcherId: msg.dispatcherId });
+          applyPresence({ type: 'left', dispatcherId: msg.dispatcherId, now: Date.now() });
           break;
         case 'dispatcher_viewing':
-          dispatchPresence({ type: 'viewing', dispatcherId: msg.dispatcherId, truckId: msg.truckId ?? null });
+          applyPresence({ type: 'viewing', dispatcherId: msg.dispatcherId, truckId: msg.truckId ?? null, now: Date.now() });
           break;
         case 'route_assigned':
           setRoutes((r) => mergeRoute(r, msg.route));
+          applyPresence({ type: 'activity', dispatcherId: msg.assignedBy, now: Date.now() });
           addLog(`${nameOf(msg.assignedBy)} assigned ${msg.route.id} (${msg.route.destination}) to ${msg.truckId}`);
           break;
         case 'route_updated':
           setRoutes((r) => mergeRoute(r, msg.route));
+          applyPresence({ type: 'activity', dispatcherId: msg.updatedBy, now: Date.now() });
           addLog(`${nameOf(msg.updatedBy)} set ${msg.route.id} to "${msg.route.status}"`);
           break;
         case 'route_reassigned':
           setRoutes((r) => mergeRoute(r, msg.route));
+          applyPresence({ type: 'activity', dispatcherId: msg.reassignedBy, now: Date.now() });
           addLog(`${nameOf(msg.reassignedBy)} moved ${msg.route.id} from ${msg.oldTruckId} to ${msg.newTruckId}`);
           break;
         case 'truck_alert':
+          applyPresence({ type: 'activity', dispatcherId: msg.alert.sentBy, now: Date.now() });
           addLog(`${nameOf(msg.alert.sentBy)} sent ${msg.alert.severity} alert to ${msg.alert.truckId}: "${msg.alert.message}"`);
           break;
         case 'fleet_reset':

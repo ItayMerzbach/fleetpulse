@@ -24,8 +24,8 @@ export function TruckList({ fp }: { fp: FleetPulse }) {
           {viewers
             .filter((d) => d.viewingTruckId === t.id)
             .map((d) => (
-              <div key={d.id} className="small viewer">
-                👁 {d.name} is viewing
+              <div key={d.id} className={`small ${d.status === 'uncertain' ? 'muted' : 'viewer'}`}>
+                👁 {d.name} is viewing{d.status === 'uncertain' && ' (connection uncertain)'}
               </div>
             ))}
         </div>
