@@ -1,0 +1,13 @@
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import { ErrorBoundary } from './ui/components/ErrorBoundary';
+import './styles.css';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <ErrorBoundary name="FleetPulse" fallback={(e) => <pre className="fatal">FleetPulse crashed: {e.message}. Reload the page.</pre>}>
+      <App />
+    </ErrorBoundary>
+  </StrictMode>,
+);
