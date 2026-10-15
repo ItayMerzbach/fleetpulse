@@ -8,8 +8,8 @@ export const DEPOT = { lat: 32.0853, lng: 34.7818 };
 const STALE_MS = 10_000;
 
 /**
- * Everything a map renderer needs, independent of HOW it draws (SVG grid or
- * Google Maps). Renderers stay dumb; switching map provider touches no data code.
+ * Everything a map renderer needs, independent of HOW it draws (today
+ * Leaflet). Renderers stay dumb; switching map provider touches no data code.
  */
 export function useMapModel() {
   const app = useFleetPulse();

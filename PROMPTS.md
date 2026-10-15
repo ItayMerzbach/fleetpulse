@@ -15,7 +15,7 @@
 
 **What the AI did with it**
 - Read the 22-page brief and noticed it requires the file to be named **`PROMPTS.md`**, not `prompt.md`. It used the brief's name and told me.
-- Picked React + TS + Vite + Vitest (the brief's recommendation) and an SVG grid instead of Leaflet (no tile server, and the brief says map quality isn't graded).
+- Picked React + TS + Vite + Vitest (the brief's recommendation) and, at first, an SVG grid map (the brief says map quality isn't graded). I later replaced it with a real map; see §6–7.
 
 ---
 
@@ -105,7 +105,16 @@ This is the most important section. The AI's first draft contained these errors,
 - **Critical point raised by the AI:** a reviewer who runs `npm start` without a key would otherwise get a grey "For development purposes only" map or nothing at all. So the grid stays as a fallback for three cases: no key, script load failure (`onError`), and a rejected key. Google reports the last one through the global `gm_authFailure` callback, not through the loader's promise, which is easy to miss.
 - **Verified:** no key → grid with a legend note. Deliberately invalid placeholder key → Google script loads, rejects the key, app falls back with "Google Maps rejected the API key". The real-key rendering has to be checked with my own key, since the AI did not create or handle credentials.
 
-## 7. Verification performed (not just "tests pass")
+## 7. Follow-up prompt: Leaflet instead of Google Maps (mine, verbatim)
+
+> For this development, using React-Leaflet is sufficient; Google Maps is not needed.
+
+**What the AI did**
+- Replaced the Google renderer with `LeafletFleetMap` (react-leaflet 5). Because the map was already split into `useMapModel()` (data) and a renderer (drawing), **no data code changed**. Also removed the Google dependency, the API-key config, `.env.example`, and the SVG grid fallback, which is no longer needed since Leaflet works without a key.
+- Markers are `L.divIcon` HTML with the same visual language. **Security note raised by the AI:** `divIcon` takes a raw HTML string, and dispatcher names are user input, so they are HTML-escaped. The icon is memoised on its appearance (status, heading, fault, viewers), so a position update doesn't rebuild the marker's DOM.
+- **AI mistake caught by checking in the browser:** the first tile choice (CARTO "Dark Matter", widely cited as keyless) rendered **"API KEY REQUIRED"** watermarks — the provider's terms have changed. Switched to the standard OpenStreetMap tile server with attribution, darkened via a CSS filter. A second issue: react-leaflet applies layer options only on creation, so the new CSS class only took effect after a full reload, not after hot reload.
+
+## 8. Verification performed (not just "tests pass")
 
 - **Live, in the browser, against the real mock server:** truck_7 shows *SENSOR FAULT · reported 999 km/h, showing last valid reading*. Fuel glitches are held as *SUSPECT* and logged "resolved after 4.0s — no action needed". GPS batches appear as hollow path points. Validation messages show on bad input. Route created; stale-version race reproduced and resolved through the dialog; the other dispatcher (`curl` as `omer-1a2b`) is shown by name, which comes from the id slug.
 - **Observability tab live:** ~0.4 SSE events/s, matching 0.4 store commits/s (one commit per message, as designed), WS RTT ≈1 ms, 0 handler errors.
@@ -113,7 +122,7 @@ This is the most important section. The AI's first draft contained these errors,
 
 ---
 
-## 8. What I'd tell a reviewer about AI usage
+## 9. What I'd tell a reviewer about AI usage
 
 - I used AI for **speed**: boilerplate, schemas, CSS, and the first draft of every module. I kept **judgement** for myself: which quirk handling is correct, what the UX should say during a conflict, and which heuristic to drop.
 - The most valuable "prompts" were not code requests. They were *"run it against the real server and try to break it"*, which found 5.1 and 5.2, and *"write tests from the quirks, not from the implementation"*, which found 5.3 and exposed the bad assumption in 5.4. The AI's first draft passed a typecheck with all four defects still in it.
