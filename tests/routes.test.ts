@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError, createApi, withRetry } from '../src/api';
-import { conflictMessage, lastChangedBy, mergeRoute, validateRouteInput } from '../src/routes';
+import { changeStatusSafely, conflictMessage, lastChangedBy, mergeRoute, reassignSafely, validateRouteInput } from '../src/routes';
 import type { Route } from '../src/types';
 
 const route = (over: Partial<Route> = {}): Route => ({
@@ -61,6 +61,51 @@ describe('optimistic locking', () => {
     const newer = route({ _version: 3, status: 'in-progress' });
     const state = mergeRoute({ route_1: newer }, route({ _version: 2 }));
     expect(state.route_1).toBe(newer);
+  });
+});
+
+describe('conflict resolution flow', () => {
+  const nameOf = (id: string) => ({ 'omer-1a2b': 'Omer', 'noa-77aa': 'Noa' })[id] ?? id;
+
+  it('status change → 409 → re-fetch → tells the dispatcher who changed it, and returns the fresh routes', async () => {
+    const theirs = route({ _version: 2, status: 'in-progress', lastModifiedBy: 'omer-1a2b', lastModifiedAt: 5000 });
+    const net = fakeFetch([
+      { status: 409, body: { error: 'Route was modified by another dispatcher', currentVersion: 2 } },
+      { status: 200, body: { routes: [theirs] } },
+    ]);
+    const result = await changeStatusSafely(createApi('', 'dana-0001', net.impl), route({ _version: 1 }), 'cancelled', nameOf);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain('changed by Omer');
+    expect(result.message).toContain('not applied');
+    expect(result.latestRoutes).toEqual([theirs]);
+    expect(net.calls.map((c) => c.init.method)).toEqual(['PATCH', 'GET']); // no automatic retry of the PATCH
+  });
+
+  it('status change without conflict returns the updated route', async () => {
+    const net = fakeFetch([{ status: 200, body: route({ _version: 2, status: 'in-progress' }) }]);
+    const result = await changeStatusSafely(createApi('', 'd', net.impl), route(), 'in-progress', nameOf);
+    expect(result).toEqual({ ok: true, route: route({ _version: 2, status: 'in-progress' }) });
+  });
+
+  it('reassign is stopped (no PUT sent) when the route changed since the dispatcher looked at it', async () => {
+    const net = fakeFetch([{ status: 200, body: { routes: [route({ _version: 2, lastModifiedBy: 'noa-77aa', lastModifiedAt: 5000 })] } }]);
+    const result = await reassignSafely(createApi('', 'd', net.impl), route({ _version: 1 }), 'truck_4', nameOf);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain('changed by Noa');
+    expect(net.calls.map((c) => c.init.method)).toEqual(['GET']);
+  });
+
+  it('reassign goes ahead when the version is unchanged', async () => {
+    const net = fakeFetch([
+      { status: 200, body: { routes: [route({ _version: 1 })] } },
+      { status: 200, body: route({ _version: 2, truckId: 'truck_4' }) },
+    ]);
+    const result = await reassignSafely(createApi('', 'd', net.impl), route({ _version: 1 }), 'truck_4', nameOf);
+    expect(result.ok).toBe(true);
+    expect(net.calls.map((c) => c.init.method)).toEqual(['GET', 'PUT']);
   });
 });
 

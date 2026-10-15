@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ApiError, createApi } from './api';
 import { nameFromId, presenceReducer } from './presence';
-import { conflictMessage, mergeRoute } from './routes';
+import { changeStatusSafely, mergeRoute, reassignSafely, type ChangeResult } from './routes';
 import { applyReadings, isValidReading } from './telemetry';
 import type { LogEntry, Route, RouteStatus, Truck } from './types';
 
@@ -175,42 +175,26 @@ export function useFleetPulse(identity: Identity) {
     }
   }
 
-  /** `route` is the version the dispatcher was looking at — it's sent as If-Match. */
-  async function changeStatus(route: Route, status: RouteStatus) {
-    try {
-      const updated = await api.updateRouteStatus(route, status);
-      setRoutes((r) => mergeRoute(r, updated));
+  /** Shared by both route actions: apply the result, or show and log the conflict. */
+  function handleResult(result: ChangeResult) {
+    if (result.ok) {
+      setRoutes((r) => mergeRoute(r, result.route));
       return null;
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        const latest = await refreshRoutes().catch(() => []);
-        const message = conflictMessage(route.id, latest.find((r) => r.id === route.id), nameOf);
-        addLog(`Conflict: ${message}`);
-        return message;
-      }
-      return (err as Error).message;
     }
+    if (result.latestRoutes) {
+      setRoutes(byId(result.latestRoutes)); // show the dispatcher the current state
+      addLog(`Conflict: ${result.message}`);
+    }
+    return result.message;
   }
 
-  /**
-   * The reassign endpoint has no If-Match, so we check the version ourselves
-   * first. This narrows the race window but cannot fully close it.
-   */
+  /** `route` is the version the dispatcher was looking at — it's sent as If-Match. */
+  async function changeStatus(route: Route, status: RouteStatus) {
+    return handleResult(await changeStatusSafely(api, route, status, nameOf));
+  }
+
   async function reassignRoute(route: Route, newTruckId: string) {
-    try {
-      const latest = await refreshRoutes();
-      const current = latest.find((r) => r.id === route.id);
-      if (!current || current._version !== route._version) {
-        const message = conflictMessage(route.id, current, nameOf);
-        addLog(`Conflict: ${message}`);
-        return message;
-      }
-      const updated = await api.reassignRoute(route.id, newTruckId);
-      setRoutes((r) => mergeRoute(r, updated));
-      return null;
-    } catch (err) {
-      return (err as Error).message;
-    }
+    return handleResult(await reassignSafely(api, route, newTruckId, nameOf));
   }
 
   async function sendAlert(truckId: string, message: string, severity: string) {

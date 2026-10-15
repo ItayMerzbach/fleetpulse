@@ -152,7 +152,7 @@ The AI asked two clarifying questions before starting, because the answers chang
 | Sensor filters as reducer plugins and a processor class | Two pure functions, `filterSpeed` and `filterFuel`, plus `applyReadings` |
 | Circuit breaker, backoff, watchdog, ping/pong | `withRetry` (Retry-After) for 503s; EventSource's own reconnect; WS reconnect after 2 s |
 | Conflict dialog with three columns | A message naming who changed the route and its new state |
-| 58 tests (with DOM / integration) | 22 pure unit tests covering every required area |
+| 58 tests (with DOM / integration) | 22 pure unit tests (26 after §10) |
 
 **What was deliberately kept** (each is a requirement):
 - Event-time ordering, and merging GPS batches into a single path.
@@ -173,12 +173,22 @@ The AI asked two clarifying questions before starting, because the answers chang
 - Reassignment works.
 - Closing four stale browser tabs removed their presence entries, ghost delays included.
 
-## 10. Verification performed (current version)
+## 10. Follow-up prompt: requirements audit (mine, verbatim)
 
-- `npm test` → 22/22. `tsc` strict → clean. `vite build` → OK.
+> Don't you need to perform at least 8 tests? Read through all the requests and make sure you haven't missed anything.
+
+The AI re-read the whole brief line by line against the code. The 8-test minimum was met (22 tests, every required area covered), but the audit found **two real gaps**:
+1. **"Test optimistic locking / conflict resolution flow"** was only partly tested. The pieces were covered (If-Match header, 409 → error, message text), but the *flow* (PATCH → 409 → re-fetch → explain who) lived inside the React hook, where no test reached it. Same for the reassign version check. **Fix:** moved both flows into `routes.ts` (`changeStatusSafely`, `reassignSafely`) and added 4 tests with a fake server. These also check that the PATCH is **not** retried and that no PUT is sent when the version changed. The hook now only applies the result.
+2. **The README had no "Key technical decisions and trade-offs" section**, which the submission instructions require. Added.
+
+Also checked and documented: which listed endpoints are intentionally unused (`/api/telemetry/history`, `ping`, `/api/reset`).
+
+## 11. Verification performed (current version)
+
+- `npm test` → 26/26. `tsc` strict → clean. `vite build` → OK.
 - Every requirement in the brief was checked in the browser against the real mock server (see §9).
 
-## 11. What I'd tell a reviewer about AI usage
+## 12. What I'd tell a reviewer about AI usage
 
 - I used AI for **speed**: drafting code, wiring, tests. I kept **judgement** for myself: what the quirk handling should do, what the dispatcher sees in a conflict, which heuristics to drop, and finally how much code is worth having at all.
 - The most valuable prompts were not code requests. They were *"run it against the real server and try to break it"*, *"why does this requirement look ignored?"*, and *"make it small enough that I can defend every line."* Each one exposed problems that typecheck and the unit tests had passed.

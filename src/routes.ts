@@ -1,3 +1,4 @@
+import { ApiError, type Api } from './api';
 import type { Route, RouteStatus } from './types';
 
 /** Allowed status changes. The server accepts anything, so the UI enforces the flow. */
@@ -45,6 +46,51 @@ export function conflictMessage(routeId: string, current: Route | undefined, nam
     `${routeId} was changed by ${nameOf(lastChangedBy(current))} while you were working on it ` +
     `(now "${current.status}" on ${current.truckId}). Your change was not applied — check the route and try again.`
   );
+}
+
+export type ChangeResult = { ok: true; route: Route } | { ok: false; message: string; latestRoutes?: Route[] };
+
+/**
+ * Status change with optimistic locking. `seen` is the route as the dispatcher
+ * saw it, so its version goes out as If-Match. On 409 we re-fetch the routes and
+ * explain who changed it. We never retry automatically: that would overwrite
+ * the other dispatcher's decision.
+ */
+export async function changeStatusSafely(
+  api: Pick<Api, 'updateRouteStatus' | 'getRoutes'>,
+  seen: Route,
+  status: RouteStatus,
+  nameOf: (id: string) => string,
+): Promise<ChangeResult> {
+  try {
+    return { ok: true, route: await api.updateRouteStatus(seen, status) };
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 409) return { ok: false, message: (err as Error).message };
+    const { routes } = await api.getRoutes().catch(() => ({ routes: [] as Route[] }));
+    return { ok: false, message: conflictMessage(seen.id, routes.find((r) => r.id === seen.id), nameOf), latestRoutes: routes };
+  }
+}
+
+/**
+ * The reassign endpoint has no If-Match, so we check the version ourselves just
+ * before calling it. This narrows the race window but cannot fully close it.
+ */
+export async function reassignSafely(
+  api: Pick<Api, 'reassignRoute' | 'getRoutes'>,
+  seen: Route,
+  newTruckId: string,
+  nameOf: (id: string) => string,
+): Promise<ChangeResult> {
+  try {
+    const { routes } = await api.getRoutes();
+    const current = routes.find((r) => r.id === seen.id);
+    if (!current || current._version !== seen._version) {
+      return { ok: false, message: conflictMessage(seen.id, current, nameOf), latestRoutes: routes };
+    }
+    return { ok: true, route: await api.reassignRoute(seen.id, newTruckId) };
+  } catch (err) {
+    return { ok: false, message: (err as Error).message };
+  }
 }
 
 /** Returns an error message, or null when the input is valid. */

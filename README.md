@@ -7,7 +7,7 @@ A deliberately minimal dashboard for 12 trucks: live map, route assignment with 
 ```bash
 npm install
 npm start   # mock server on :3000 + dashboard (Vite prints the URL, normally :5173)
-npm test    # 22 unit tests
+npm test    # 26 unit tests
 ```
 
 To act as several dispatchers, open a second tab and sign in with another name. Each tab is a separate dispatcher (identity lives in `sessionStorage`). To reset the server: `curl -X POST localhost:3000/api/reset`.
@@ -26,7 +26,7 @@ src/
   useFleetPulse.ts   the one hook: SSE + WebSocket + REST → React state, plus actions
   App.tsx            login + layout
   components/        TruckList, FleetMap, TruckDetail, RoutesPanel, Sparkline, ErrorBoundary
-tests/               telemetry, presence, routes/api
+tests/               telemetry, presence, routes/api (incl. the 409 conflict flows)
 ```
 
 **Data flow:**
@@ -39,6 +39,19 @@ UI action ─▶ api.ts (REST) ─▶ result merged into state; errors shown nex
 
 All logic that decides *what is true* (ordering, filtering, conflicts, presence) lives in small pure functions with tests. React components only display state and call actions.
 
+## Key technical decisions and trade-offs
+
+- **Pure functions for every decision, React only for display.** Ordering, sensor filtering, presence, conflict detection and retry are plain functions in `telemetry.ts`, `presence.ts`, `routes.ts` and `api.ts`, tested without a browser. The telemetry pipeline knows nothing about React. *Trade-off:* the wiring in `useFleetPulse.ts` itself is only verified manually in the browser, not by unit tests.
+- **One hook with plain React state** instead of Redux/Zustand or an event bus. For 12 trucks and one screen this is the simplest thing that works, and every data path is visible in one file. *Trade-off:* at a much larger scale I'd split it per feature and add a store.
+- **Event time, not arrival time.** Each truck keeps the timestamp of its newest applied reading. Anything older only feeds the path. This one rule handles both GPS batches and out-of-order readings.
+- **Hold the last trusted value instead of showing glitches.** Speed above 160 km/h is rejected outright. A fuel drop is held as "suspect" for up to 8 s before being believed. *Trade-off:* a real sudden fuel loss is reported about 8 s late. That's acceptable compared with false low-fuel alerts every few minutes.
+- **Never auto-retry a 409.** Re-sending would silently overwrite the other dispatcher's decision, which is exactly the incident in the brief. Instead we show who changed the route and its fresh state, and the dispatcher decides.
+- **Client-generated dispatcher ids with the name inside** (`dana_levi-3f2a`). The id exists before the first request, survives reconnects, and lets us show a readable name even for dispatchers who joined before us.
+- **Bounded memory:** path 60 points, chart history 60, activity log 200 entries per page, so the dashboard can run for hours. One state update per SSE message, so even a 30-reading GPS batch costs one render.
+- **Reconnection:** EventSource reconnects by itself. The WebSocket reconnects after 2 s, re-registers, re-announces what we're viewing, and re-fetches routes to catch up on missed changes. Both connections are closed when the component unmounts.
+- **Not used from the endpoint list:** `/api/telemetry/history` (charts fill from the live stream within a minute), WebSocket `ping` (the browser detects closed sockets), and `/api/reset` (curl during development).
+- **Scope:** only the basic requirements are implemented. The bonus features were left out on purpose to keep the code small enough to fully explain.
+
 ## How each quirk is handled
 
 | # | Quirk | Handling |
@@ -46,7 +59,7 @@ All logic that decides *what is true* (ordering, filtering, conflicts, presence)
 | 1 | GPS batch (10–30 old readings) | `applyReadings` sorts by timestamp. Readings older than the truck's latest only go into its **path**. The map draws one circle and one path line per truck, never a marker per reading. |
 | 2 | Fuel reads 0% while braking | A sudden drop (≥15 points, or exactly 0) is *suspect*, and the last trusted value is shown with "(checking sensor)". If it lasts 8 s it's accepted as real. "LOW FUEL" only uses trusted values. |
 | 3 | truck_7 speed 999 km/h | Values above 160 km/h (or negative/NaN) are rejected. The last valid speed is shown with "speed sensor fault", and the chart shows a gap. |
-| 4 | 409 on version mismatch | Every PATCH sends `If-Match` with the version the dispatcher was looking at. On 409 we re-fetch routes and show who changed the route and its new state. Nothing is overwritten. |
+| 4 | 409 on version mismatch | Every PATCH sends `If-Match` with the version the dispatcher was looking at. On 409, `changeStatusSafely` re-fetches routes and shows who changed the route and its new state. Nothing is overwritten. |
 | 5 | Out-of-order readings | Same rule as #1: a reading older than the truck's latest never overrides it. |
 | 6 | Ghost presence (leave 10 s late) | A leave for an unknown dispatcher or for ourselves is ignored. Later activity re-adds a dispatcher. When someone joins, we re-announce what we're viewing. |
 | 7 | `GET /api/fleet` 503 + Retry-After | `withRetry` waits Retry-After seconds (otherwise 1/2/4 s), up to 3 retries. If that fails, an error banner is shown; live telemetry still works. |
